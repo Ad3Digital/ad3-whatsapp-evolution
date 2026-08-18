@@ -1,0 +1,4 @@
+interface:
+  display_name: "AD3 WhatsApp Evolution"
+  short_description: "Leituras e operacoes seguras via Evolution API."
+  default_prompt: "Use $ad3-whatsapp-evolution para planejar e aplicar uma operacao segura no WhatsApp."

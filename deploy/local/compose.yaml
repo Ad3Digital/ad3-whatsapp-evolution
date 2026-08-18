@@ -1,0 +1,34 @@
+services:
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7@sha256:1bd8afc4a6cf48822e6cf02469aeae7bd35a12a6b616eacd1291926307f4d339
+    environment:
+      SERVER_URL: http://127.0.0.1:8080
+      AUTHENTICATION_API_KEY: "${EVOLUTION_API_KEY:?set in .env}"
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: "postgresql://evolution:${POSTGRES_PASSWORD:?set in .env}@postgres:5432/evolution"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: "redis://:${REDIS_PASSWORD:?set in .env}@redis:6379/0"
+    ports: ["127.0.0.1:8080:8080"]
+    restart: unless-stopped
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    healthcheck: {test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:8080/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))\""], interval: 30s, timeout: 8s, retries: 5}
+    volumes: [evolution_instances:/evolution/instances]
+  postgres:
+    image: postgres:15.8-alpine@sha256:8b963ea3038c3b32182ee7f592ccde21242fa7c5fd9d1b72aa333c27f1bfc809
+    environment:
+      POSTGRES_DB: "evolution"
+      POSTGRES_USER: "evolution"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set in .env}"
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    restart: unless-stopped
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"], interval: 10s, timeout: 5s, retries: 10}
+  redis:
+    image: redis:7.4-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?set in .env}"
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?set in .env}"]
+    volumes: [redis_data:/data]
+    healthcheck: {test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"], interval: 10s, timeout: 5s, retries: 10}
+    restart: unless-stopped
+volumes: {evolution_instances: {}, postgres_data: {}, redis_data: {}}

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ad3-whatsapp-evolution"
+version = "0.3.1"
+description = "AD3 Digital: operacoes seguras com Evolution API"
+requires-python = ">=3.11"
+license = {text = "Proprietary"}
+dependencies = ["cryptography>=50,<51", "qrcode>=8.2,<9"]
+
+[project.scripts]
+ad3-evolution = "ad3_evolution.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
