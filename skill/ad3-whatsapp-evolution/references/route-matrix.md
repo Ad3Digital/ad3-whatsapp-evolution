@@ -1,11 +1,16 @@
-# Evolution 2.3.7 matrix
+# Matriz Evolution 2.3.7
 
-Chat read-only: `POST /chat/findChats/{instance}` com `{ "take": N }` e
-`POST /chat/findMessages/{instance}` com `{ "where": { "key": {
-"remoteJid": "JID" } }, "take": N }`. Templates usam `group setup-plan`;
-settings chamam `group/updateSetting` com `action` igual a `announcement`,
-`not_announcement`, `locked` ou `unlocked`.
+O CLI mantém os comandos especializados para instâncias, chats, grupos,
+mensagens, onboarding e webhook. Para a superfície integral, use `api catalog`;
+ele lista 177 operações de cliente do tag 2.3.7, com método, rota e o gate
+`read`, `download`, `plan` ou `restricted`.
 
-Use only the explicit profile. Instance creation is `POST /instance/create` with `instanceName`, `integration: WHATSAPP-BAILEYS`, and `qrcode: true`; plan it with `instance create-plan`, then apply the returned id. Group list/info/invite reads use the selected instance and query parameters; group mutations are planned POST operations. QR base64 is never printed: request `--qr-file` inside the configured state directory.
+`api read` só executa leituras aprovadas. A mídia Base64 usa `api download` com
+arquivo de destino e não é impressa. Itens `restricted` retornam credenciais e
+não recebem despacho. `api plan` cobre qualquer outra operação permitida,
+preserva a confirmação por ID e nunca aceita URL, método ou rota livres.
+Identificadores adicionais usam `--param NOME=VALOR`; endpoints multipart usam
+`--file` e verificam o hash do arquivo antes da aplicação.
 
-Useful commands: `doctor`, `instance list`, `instance status --instance NAME`, `instance create-plan --instance NAME --qr-file PATH`, `group create`, `group update`, `message plan-text`, `message plan-media`, `blacklist`, and `onboarding plan`.
+Callbacks de entrada, Manager e métricas pertencem ao servidor e ficam fora da
+CLI.

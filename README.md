@@ -1,9 +1,9 @@
 # AD3 WhatsApp Evolution CLI
 
 Uma CLI local para operações seguras com Evolution API 2.3.7, feita para
-reduzir a saída e o contexto consumido por agentes de IA. Ela não é o Evolution
-Manager: o Manager administra a stack; esta CLI consulta, cria planos explícitos
-e só aplica uma mutação com confirmação exata.
+reduzir a saída e o contexto consumido por agentes de IA. A versão 0.4.0
+mantém os comandos focados e acrescenta o catálogo integral do perfil para
+operações avançadas sem abrir despacho HTTP arbitrário.
 
 ## Economia de saída para agentes
 
@@ -29,6 +29,7 @@ Requer Python 3.11 ou posterior.
 py -3 -m pip install -e .
 ad3-evolution --mode demo doctor
 ad3-evolution capabilities
+ad3-evolution api catalog --prefix message.
 ```
 
 O modo `demo` é offline. Para `remote` ou `local`, configure ambiente ou `.env`
@@ -39,6 +40,39 @@ AD3_EVOLUTION_MODE=remote
 EVOLUTION_BASE_URL=http://127.0.0.1:8080
 EVOLUTION_API_KEY=definida-no-ambiente-local
 ```
+
+## API integral 2.3.7
+
+`api catalog` expõe as 177 operações de cliente do tag oficial 2.3.7, com
+método, rota, parâmetros de caminho, suporte a upload/download e modo de
+execução. Callbacks de entrada, Manager e métricas pertencem ao servidor e não
+aparecem como comandos de cliente. Duas rotas que devolvem credenciais ficam
+catalogadas como `restricted`, mas não são despachadas pela CLI.
+
+Use `api read` somente para operações marcadas como `read`; ele aceita payload
+e query como objeto JSON. O único item marcado como `download` grava a mídia
+Base64 diretamente em arquivo, sem expor o conteúdo no terminal. Toda operação
+marcada como `plan`, inclusive envio, configuração, exclusão e rotas de baixo
+nível, gera um plano hashado e só sai após `apply` com o mesmo ID.
+
+```powershell
+ad3-evolution api read --operation chat.find-contacts --instance aula --payload-file .\find-contacts.json
+ad3-evolution api download --operation chat.get-base64-from-media-message --instance aula --payload-file .\media.json --output-file .\media.bin
+ad3-evolution api plan --operation message.send-poll --instance aula --payload-file .\poll.json
+ad3-evolution apply --plan-id ID --confirm ID
+```
+
+Rotas com identificador adicional usam `--param NOME=VALOR`. Para os cinco
+endpoints de mídia multipart, passe `--file`; o plano registra hash e tamanho
+do arquivo e recusa a aplicação se o arquivo mudar. Prefira `--payload-file`
+UTF-8 para dados sensíveis, pois `--payload` fica exposto ao histórico do
+shell. Respostas com Base64, token, chave, senha ou autorização são redigidas
+antes de qualquer saída.
+
+Os payloads continuam iguais aos do contrato oficial. O catálogo deliberadamente
+não cria uma segunda sintaxe por endpoint: isso mantém a cobertura completa sem
+inventar campos nem permitir URL ou método arbitrários.
+
 
 ## Protocolo para agentes
 

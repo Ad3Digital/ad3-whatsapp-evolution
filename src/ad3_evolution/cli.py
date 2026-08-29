@@ -1,14 +1,16 @@
 from __future__ import annotations
-import argparse, json, sys
+import argparse, json, re, sys
 from pathlib import Path
-from .config import Config
-from .store import Store, PlanError
-from .service import Service
-from .client import EvolutionClient
-from .security import redact
+
+from . import __version__
 from .agent_protocol import capabilities, encode_jsonl, run_batch
 from .branding import banner, donation_text
-from . import __version__
+from .client import EvolutionClient
+from .config import Config
+from .profiles import api_catalog
+from .security import redact
+from .service import Service
+from .store import Store, PlanError
 
 def out(value, pretty=False):
  print(json.dumps(redact(value), ensure_ascii=False, sort_keys=True, indent=2 if pretty else None, separators=None if pretty else (",", ":")))
@@ -42,6 +44,32 @@ def read_message(value, file_name):
  achados=[m for m in _MOJIBAKE if m in text]
  if achados: raise SystemExit("mensagem contem mojibake e nao foi enviada: "+", ".join(repr(x) for x in achados))
  return text
+def read_json_object(value, file_name, label):
+ if value is not None and file_name: raise SystemExit(f"informe somente --{label} ou --{label}-file")
+ if file_name:
+  try: raw=Path(file_name).read_text(encoding="utf-8-sig")
+  except UnicodeDecodeError: raise SystemExit(f"arquivo de {label} nao esta em UTF-8")
+  except OSError: raise SystemExit(f"arquivo de {label} nao pode ser lido")
+ elif value is not None:
+  raw=value
+ else:
+  return {}
+ try: parsed=json.loads(raw)
+ except (TypeError,json.JSONDecodeError): raise SystemExit(f"{label} precisa ser um objeto JSON valido")
+ if not isinstance(parsed,dict): raise SystemExit(f"{label} precisa ser um objeto JSON")
+ return parsed
+
+
+def read_path_params(values):
+ parsed={}
+ for raw in values:
+  key,separator,value=raw.partition("=")
+  if not separator or not value or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*",key): raise SystemExit("parametros de rota usam NOME=VALOR")
+  if key in parsed: raise SystemExit("parametro de rota repetido")
+  parsed[key]=value
+ return parsed
+
+
 def parser():
  p=argparse.ArgumentParser(prog="ad3-evolution", description="EVOLUTION AD3 DIGITAL | WhatsApp Evolution seguro por planos", epilog="Use 'ad3-evolution donate' para apoiar a ferramenta.")
  p.add_argument("--version", action="version", version=__version__)
@@ -80,6 +108,29 @@ def parser():
  bl.add_parser("list")
  ob=sub.add_parser("onboarding").add_subparsers(dest="onboard_cmd",required=True); op=ob.add_parser("plan"); op.add_argument("--creator-instance",required=True); op.add_argument("--participant-instance",action="append",default=[]); op.add_argument("--admin-instance",action="append",default=[]); op.add_argument("--welcome-instance"); op.add_argument("--client-phone",required=True); op.add_argument("--group-name",required=True); op.add_argument("--description",default=""); op.add_argument("--picture"); op.add_argument("--welcome",default="Bem-vindo à AD3 Digital!"); oa=ob.add_parser("apply"); oa.add_argument("--plan-id",required=True); oa.add_argument("--confirm",required=True)
  op.add_argument("--existing-jid")
+ api=sub.add_parser("api",help="acessa o catálogo integral Evolution 2.3.7")
+ api_sub=api.add_subparsers(dest="api_cmd",required=True)
+ catalog=api_sub.add_parser("catalog",help="lista operações e o modo de execução")
+ catalog.add_argument("--prefix",help="filtra IDs pelo prefixo, por exemplo message.")
+ def api_request(command):
+  command.add_argument("--operation",required=True,help="ID retornado por api catalog")
+  command.add_argument("--instance",help="instância quando a rota a exigir")
+  command.add_argument("--param",dest="params",action="append",default=[],help="parâmetro de rota NOME=VALOR")
+  payload=command.add_mutually_exclusive_group()
+  payload.add_argument("--payload",help="objeto JSON; prefira --payload-file para dados sensíveis")
+  payload.add_argument("--payload-file",dest="payload_file",help="arquivo JSON UTF-8")
+  query=command.add_mutually_exclusive_group()
+  query.add_argument("--query",help="objeto JSON de query string")
+  query.add_argument("--query-file",dest="query_file",help="arquivo JSON UTF-8")
+ api_read=api_sub.add_parser("read",help="executa somente operações catalogadas como leitura")
+ api_request(api_read)
+ api_download=api_sub.add_parser("download",help="salva mídia Base64 sem expô-la no terminal")
+ api_request(api_download)
+ api_download.add_argument("--output-file",required=True,help="novo arquivo de destino")
+ api_plan=api_sub.add_parser("plan",help="cria plano para qualquer operação catalogada")
+ api_request(api_plan)
+ api_plan.add_argument("--file",help="arquivo para endpoint multipart compatível")
+ api_plan.add_argument("--file-field",default="file",help="campo multipart; padrão: file")
  demo=sub.add_parser("demo").add_subparsers(dest="demo_cmd",required=True); demo.add_parser("reset"); demo.add_parser("status")
  return p
 
@@ -96,12 +147,20 @@ def main(argv=None):
  a=parser().parse_args([value for value in raw_argv if value!="--pretty"]); a.pretty=pretty_requested
  if a.cmd=="donate": print(donation_text(color=not a.no_color)); return 0
  if a.cmd=="capabilities": out(capabilities(),a.pretty); return 0
+ if a.cmd=="api" and a.api_cmd=="catalog": out(api_catalog(a.prefix),a.pretty); return 0
  c=Config.load(a.mode,a.state_dir); s=Service(Store(c.database),c.mode,None if c.mode=="demo" else EvolutionClient(c.base_url,c.api_key,c.timeout))
  try:
   if a.cmd=="agent":
    try: raw=Path(a.input_file).read_bytes() if a.input_file else sys.stdin.buffer.read()
    except OSError: print("error: input file cannot be read",file=sys.stderr); return 2
    responses,failed=run_batch(s,raw); sys.stdout.write(encode_jsonl(responses)); return 2 if failed else 0
+  if a.cmd=="api":
+   params=read_path_params(a.params)
+   payload=read_json_object(a.payload,a.payload_file,"payload")
+   query=read_json_object(a.query,a.query_file,"query")
+   if a.api_cmd=="read": out(s.api_read(a.operation,a.instance,params,payload,query),a.pretty); return 0
+   if a.api_cmd=="download": out(s.api_download(a.operation,a.instance,params,payload,query,a.output_file),a.pretty); return 0
+   out(s.api_plan(a.operation,a.instance,params,payload,query,a.file,a.file_field),a.pretty); return 0
   if a.cmd=="doctor": out(s.doctor(),a.pretty); return 0
   if a.cmd=="apply": out(s.apply(a.plan_id,a.confirm),a.pretty); return 0
   if a.cmd=="plan-status": out(s.store.plan_status(a.id),a.pretty); return 0

@@ -16,7 +16,9 @@ class CoreTests(unittest.TestCase):
  def tearDown(self): self.store.close(); self.tmp.cleanup()
  def test_demo_is_offline(self):
   with patch('urllib.request.urlopen',side_effect=AssertionError('network')): self.assertTrue(self.s.doctor()['ok']); self.assertEqual(len(self.s.instances()),3)
- def test_redaction(self): self.assertNotIn('5511999999999',str(redact({'api_key':'secret','phone':'5511999999999'})))
+ def test_redaction(self):
+  redacted=redact({'api_key':'secret','phone':'5511999999999','base64':'aGVsbG8=','flag':False})
+  self.assertNotIn('5511999999999',str(redacted)); self.assertEqual(redacted['base64'],'[REDACTED]'); self.assertFalse(redacted['flag']); self.assertEqual(redact('data:image/png;base64,aGVsbG8='),'[REDACTED]')
  def test_plan_replay_expiry(self):
   p=self.s.plan('group_create',{'instance':'creator','subject':'x'}); self.assertEqual(self.s.apply(p['id'],p['id'])['status'],'created')
   with self.assertRaises(PlanError): self.s.apply(p['id'],p['id'])
@@ -124,4 +126,28 @@ class HttpTests(unittest.TestCase):
   try:
    with tempfile.TemporaryDirectory() as d:
     s=Service(Store(pathlib.Path(d)/'x.db'),'remote',EvolutionClient(f'http://127.0.0.1:{srv.server_port}','secret'));p=s.plan('instance_create',{'instance':'new','qr_file':str(pathlib.Path(d)/'qr.png')});r=s.apply(p['id'],p['id']);self.assertEqual(seen['path'],'/instance/create');self.assertEqual(seen['method'],'POST');self.assertEqual(seen['key'],'secret');self.assertIn('WHATSAPP-BAILEYS',seen['body']);self.assertNotIn('YWJj',str(r));self.assertTrue(pathlib.Path(r['qr_file']).is_file());s.store.close()
+  finally: srv.shutdown();t.join();srv.server_close()
+ def test_catalogued_path_params_are_encoded(self):
+  seen={}
+  class H(BaseHTTPRequestHandler):
+   def do_GET(self):
+    seen["path"]=self.path;self.send_response(200);self.end_headers();self.wfile.write(b'{"ok":true}')
+   def log_message(self,*x): pass
+  srv=HTTPServer(('127.0.0.1',0),H);t=threading.Thread(target=srv.serve_forever);t.start()
+  try:
+   result=EvolutionClient(f'http://127.0.0.1:{srv.server_port}','key').request('openai.fetch','creator',params={'openaiBotId':'bot id'})
+   self.assertTrue(result["ok"]);self.assertEqual(seen["path"],"/openai/fetch/bot%20id/creator")
+  finally: srv.shutdown();t.join();srv.server_close()
+ def test_catalogued_upload_uses_multipart(self):
+  seen={}
+  class H(BaseHTTPRequestHandler):
+   def do_POST(self):
+    seen["path"]=self.path;seen["type"]=self.headers["Content-Type"];seen["body"]=self.rfile.read(int(self.headers["Content-Length"]));self.send_response(200);self.end_headers();self.wfile.write(b'{"ok":true}')
+   def log_message(self,*x): pass
+  srv=HTTPServer(('127.0.0.1',0),H);t=threading.Thread(target=srv.serve_forever);t.start()
+  try:
+   with tempfile.TemporaryDirectory() as d:
+    file=pathlib.Path(d)/"image.bin";file.write_bytes(b"image-bytes")
+    result=EvolutionClient(f'http://127.0.0.1:{srv.server_port}','key').request('message.send-media','creator',payload={'number':'5511888888888','mediatype':'image'},file_path=file)
+    self.assertTrue(result["ok"]);self.assertEqual(seen["path"],"/message/sendMedia/creator");self.assertTrue(seen["type"].startswith("multipart/form-data; boundary="));self.assertIn(b'name="number"',seen["body"]);self.assertIn(b'image-bytes',seen["body"])
   finally: srv.shutdown();t.join();srv.server_close()

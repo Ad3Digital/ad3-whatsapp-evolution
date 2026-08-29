@@ -3,7 +3,7 @@ import pathlib,tempfile,unittest
 from ad3_evolution.store import Store,PlanError
 from ad3_evolution.service import Service
 from ad3_evolution.client import EvolutionClient
-from ad3_evolution.profiles import ROUTES
+from ad3_evolution.profiles import API_OPERATIONS, ROUTES, api_catalog
 
 class Recorder:
  def __init__(self): self.calls=[]
@@ -51,6 +51,10 @@ class Operations(unittest.TestCase):
   jid=self.group(); self.assertEqual(len(self.demo.group_participants('creator',jid)),1); self.assertEqual(self.demo.whatsapp_numbers('creator',['5511888888888'])['numbers'][0]['exists'],True); code=self.demo._group(jid)[1]['invite']; self.assertEqual(self.demo.invite_info('creator',code)['jid'],jid)
   with self.assertRaises(PlanError): self.demo.invite_info('creator','https://chat.whatsapp.com/x')
   r=Recorder(); remote=Service(self.store,'remote',r); plan=remote.plan('invite_revoke',{'instance':'creator','groupJid':'x@g.us'}); remote.apply(plan['id'],plan['id']); self.assertEqual(r.calls[-1],('invite_revoke','creator',{'groupJid':'x@g.us'},None))
+ def test_remote_number_check_accepts_list_response(self):
+  r=Recorder(); r.request=lambda op,*a,**k: [{'number':'5511888888888','exists':True}] if op=='whatsapp_validate' else {'state':'open'}
+  result=Service(self.store,'remote',r).whatsapp_numbers('creator',['5511888888888'])
+  self.assertEqual(result,[{'number':'5511888888888','exists':True}])
  def test_remote_invite_send_payload(self):
   r=Recorder();s=Service(self.store,'remote',r);p=s.plan('invite_send',{'instance':'creator','groupJid':'x@g.us','description':'Entre','phones':['5511888888888']});s.apply(p['id'],p['id']);self.assertEqual(r.calls[-1],('invite_send','creator',{'groupJid':'x@g.us','description':'Entre','numbers':['5511888888888']},None))
  def test_remote_onboarding_steps(self):
@@ -217,3 +221,33 @@ class Operations(unittest.TestCase):
   text=(pathlib.Path(__file__).resolve().parents[1]/'install/Manage-AD3Evolution.ps1').read_text();self.assertIn("PURGE-VOLUMES",text);self.assertIn("-Confirm RESTORE",text)
  def test_release_excludes_source(self):
   text=(pathlib.Path(__file__).resolve().parents[1]/'scripts/build_release.py').read_text();self.assertIn("'src'",text);self.assertIn('CHECKSUMS.sha256',text)
+ def test_full_api_catalog_is_pinned_to_2_3_7(self):
+  catalog=api_catalog(); routes={item["id"]:item for item in catalog["operations"]}
+  self.assertEqual(catalog["upstream_tag"],"2.3.7"); self.assertEqual(len(API_OPERATIONS),177); self.assertEqual(len(routes),177)
+  self.assertEqual(routes["message.send-ptv"]["path"],"/message/sendPtv/{instance}"); self.assertTrue(routes["message.send-ptv"]["upload_file"])
+  self.assertEqual(routes["openai.fetch"]["path"],"/openai/fetch/{openaiBotId}/{instance}"); self.assertEqual(routes["kafka.find"]["execution"],"read")
+  self.assertEqual(routes["group.accept-invite-code"]["execution"],"plan"); self.assertEqual(routes["chat.get-base64-from-media-message"]["execution"],"download"); self.assertEqual(routes["baileys.get-auth-state"]["execution"],"restricted"); self.assertEqual(len(api_catalog("message.")["operations"]),13)
+ def test_generic_api_read_and_plan_use_explicit_catalog(self):
+  r=Recorder();s=Service(self.store,'remote',r)
+  self.assertEqual(s.api_read("chat.find-contacts","creator",payload={"where":{"id":"x"}}),{"ok":True})
+  self.assertEqual(r.calls[-1],("chat.find-contacts","creator",{"where":{"id":"x"}},{}))
+  with self.assertRaises(PlanError): s.api_read("message.send-text","creator",payload={"number":"5511888888888","text":"x"})
+  with self.assertRaises(PlanError): s.api_plan("baileys.get-auth-state","creator")
+  plan=s.api_plan("message.send-poll","creator",payload={"number":"5511888888888","name":"Pergunta","values":["A","B"],"selectableCount":1})
+  self.assertEqual(plan["kind"],"api"); self.assertEqual(s.apply(plan["id"],plan["id"]),{"ok":True})
+  self.assertEqual(r.calls[-1][0],"message.send-poll"); self.assertEqual(r.calls[-1][1],"creator")
+ def test_generic_api_upload_refuses_a_changed_file(self):
+  r=Recorder();s=Service(self.store,'remote',r); file=pathlib.Path(self.t.name)/"media.bin"; file.write_bytes(b"before")
+  plan=s.api_plan("message.send-media","creator",payload={"number":"5511888888888","mediatype":"image"},file_path=file)
+  file.write_bytes(b"after")
+  with self.assertRaises(PlanError): s.apply(plan["id"],plan["id"])
+  self.assertEqual(r.calls,[]); self.assertEqual(self.store.plan_status(plan["id"])["status"],"uncertain")
+ def test_generic_api_media_download_writes_no_base64_to_terminal(self):
+  class BinaryClient:
+   def __init__(self): self.calls=[]
+   def request(self,*args,**kwargs): self.calls.append((args,kwargs)); return {"data":{"base64":"aGVsbG8="}}
+  client=BinaryClient();s=Service(self.store,'remote',client); output=pathlib.Path(self.t.name)/"media.bin"
+  with self.assertRaises(PlanError): s.api_read("chat.get-base64-from-media-message","creator",payload={"message":{"key":"x"}})
+  with self.assertRaises(PlanError): s.api_plan("chat.get-base64-from-media-message","creator",payload={"message":{"key":"x"}})
+  result=s.api_download("chat.get-base64-from-media-message","creator",payload={"message":{"key":"x"}},output_file=output)
+  self.assertEqual(result["status"],"downloaded"); self.assertEqual(output.read_bytes(),b"hello"); self.assertEqual(client.calls[0][0][0],"chat.get-base64-from-media-message")

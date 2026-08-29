@@ -1,9 +1,9 @@
-# Operações v0.3.0
+# Operações v0.4.0
 
 Perfil suportado: Evolution 2.3.7. Configure remote/local somente por ambiente
 ou `.env` local; não coloque segredos na linha de comando.
 
-`donate --no-color` é uma saída humana Pix offline da versão 0.3.1. Não a use
+`donate --no-color` é uma saída humana Pix offline da versão 0.4.0. Não a use
 em automações, capabilities ou `agent batch`.
 
 ## Leituras e gates
@@ -24,6 +24,26 @@ apenas para leitura.
 Webhook get é sanitizado. Set-plan exige HTTPS, salvo `localhost`/`127.0.0.1`,
 rejeita query, fragmento, userinfo e headers nesta versão, e aceita somente os
 eventos oficiais do perfil.
+
+## Catálogo integral
+
+```powershell
+ad3-evolution api catalog --prefix message.
+ad3-evolution api read --operation chat.find-contacts --instance X --payload-file .\consulta.json
+ad3-evolution api download --operation chat.get-base64-from-media-message --instance X --payload-file .\media.json --output-file .\media.bin
+ad3-evolution api plan --operation message.send-poll --instance X --payload-file .\enquete.json
+ad3-evolution apply --plan-id ID --confirm ID
+```
+
+O catálogo contém as 177 operações de cliente do tag oficial 2.3.7. Cada item
+informa se é leitura direta (`read`), download seguro (`download`), plano
+(`plan`) ou restrito (`restricted`). Os dois itens restritos devolvem credenciais
+e não recebem despacho. `--param NOME=VALOR` preenche identificadores adicionais
+da rota. Os cinco endpoints de mídia multipart aceitam `--file`; o plano confere
+SHA-256 e tamanho do arquivo antes do envio. A mídia Base64 é gravada por
+`api download` e nunca aparece no terminal. Callbacks de entrada, Manager e
+métricas não são comandos de cliente.
+
 
 ## Protocolo de agente
 

@@ -13,7 +13,7 @@ ad3-evolution --mode demo doctor
 ad3-evolution capabilities
 ```
 
-A versão 0.3.1 mostra a marca humana `EVOLUTION AD3 DIGITAL` sem argumentos ou
+A versão 0.4.0 mostra a marca humana `EVOLUTION AD3 DIGITAL` sem argumentos ou
 com `--help`. `donate --no-color` renderiza um QR Pix offline em ASCII; isso não
 carrega estado e não deve ser misturado a saídas JSON/JSONL.
 
@@ -51,3 +51,12 @@ O scheduler fica fora do batch e da CLI; use o wrapper externo autorizado. CRM e
 NocoDB também compõem externamente esses gates. Nunca cole API keys, QR,
 telefones completos ou dados de clientes em logs. Consulte [operações](references/operations.md),
 [mapa de prompt](references/prompt-map.md) e a [matriz 2.3.7](references/route-matrix.md).
+
+## Catálogo integral
+
+`api catalog` lista as 177 operações de cliente do perfil 2.3.7. Use `api read`
+somente para itens marcados como leitura e `api download --output-file` para a
+mídia Base64, que nunca sai no terminal. Itens `restricted` devolvem
+credenciais e não recebem despacho. Para qualquer item marcado como plano, gere
+`api plan` com payload JSON e aplique o ID exato. O catálogo não expõe callbacks
+de entrada, Manager ou métricas, e não aceita URL ou método arbitrário.

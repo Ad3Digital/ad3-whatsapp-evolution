@@ -1,10 +1,14 @@
 from __future__ import annotations
 import base64
+import binascii
+import hashlib
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
+
 from .store import Store, PlanError
 from .client import EvolutionClient
+from .profiles import api_operation, api_path_parameters
 from .security import digest_text, normalize_phone, validate_chat_jid, validate_group_jid, validate_instance
 
 WEBHOOK_EVENTS={"APPLICATION_STARTUP","QRCODE_UPDATED","MESSAGES_SET","MESSAGES_UPSERT","MESSAGES_EDITED","MESSAGES_UPDATE","MESSAGES_DELETE","SEND_MESSAGE","SEND_MESSAGE_UPDATE","CONTACTS_SET","CONTACTS_UPSERT","CONTACTS_UPDATE","PRESENCE_UPDATE","CHATS_SET","CHATS_UPSERT","CHATS_UPDATE","CHATS_DELETE","GROUPS_UPSERT","GROUP_UPDATE","GROUP_PARTICIPANTS_UPDATE","CONNECTION_UPDATE","LABELS_EDIT","LABELS_ASSOCIATION","CALL","TYPEBOT_START","TYPEBOT_CHANGE_STATUS","REMOVE_INSTANCE","LOGOUT_INSTANCE","INSTANCE_CREATE","INSTANCE_DELETE","STATUS_INSTANCE"}
@@ -12,6 +16,74 @@ WEBHOOK_EVENTS={"APPLICATION_STARTUP","QRCODE_UPDATED","MESSAGES_SET","MESSAGES_
 class Service:
  def __init__(self,store:Store,mode:str,client:EvolutionClient|None=None): self.store,self.mode,self.client=store,mode,client
  def doctor(self): return {"brand":"AD3 Digital","mode":self.mode,"network":"disabled" if self.mode=="demo" else "configured","profile":"evolution-2.3.7","ok":True}
+ def api_read(self, operation, instance=None, params=None, payload=None, query=None):
+  request=self._api_request(operation,instance,params,payload,query); spec=api_operation(operation)
+  if spec.restricted: raise PlanError("operation is restricted because its response contains credentials")
+  if spec.download_file: raise PlanError("operation returns media; use api download with --output-file")
+  if not spec.read_only: raise PlanError("operation requires an explicit api plan and apply")
+  if self.mode=="demo": return {"status":"simulated","operation":operation,"method":spec.method}
+  kwargs={"payload":request["payload"],"query":request["query"]}
+  if request["params"]: kwargs["params"]=request["params"]
+  return self.client.request(operation,request["instance"] or "",**kwargs)
+ def api_download(self, operation, instance=None, params=None, payload=None, query=None, output_file=None):
+  request=self._api_request(operation,instance,params,payload,query); spec=api_operation(operation)
+  if spec.restricted: raise PlanError("operation is restricted because its response contains credentials")
+  if not spec.download_file: raise PlanError("operation does not return a downloadable media file")
+  if self.mode=="demo": raise PlanError("media download requires a remote or local Evolution instance")
+  try: output=Path(output_file).expanduser().resolve()
+  except (OSError,TypeError,ValueError): raise PlanError("output file is invalid") from None
+  if not output.name or not output.parent.is_dir(): raise PlanError("output directory does not exist")
+  kwargs={"payload":request["payload"],"query":request["query"]}
+  if request["params"]: kwargs["params"]=request["params"]
+  data=self._base64_media(self.client.request(operation,request["instance"] or "",**kwargs))
+  try:
+   with output.open("xb") as handle: handle.write(data)
+  except FileExistsError: raise PlanError("output file already exists") from None
+  except OSError: raise PlanError("media file cannot be written") from None
+  return {"status":"downloaded","operation":operation,"file":str(output),"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()}
+ def _base64_media(self,response):
+  values=[]
+  def collect(value,name=None):
+   if isinstance(value,dict):
+    for child_name,child in value.items(): collect(child,child_name)
+   elif isinstance(value,list):
+    for child in value: collect(child,name)
+   elif isinstance(value,str) and (str(name).lower()=="base64" or value.startswith("data:")): values.append(value)
+  collect(response)
+  if len(values)!=1: raise PlanError("Evolution response did not contain one Base64 media value")
+  encoded=values[0]
+  if encoded.startswith("data:"):
+   header,separator,encoded=encoded.partition(",")
+   if not separator or ";base64" not in header.lower(): raise PlanError("Evolution media response is not Base64")
+  try: return base64.b64decode(encoded,validate=True)
+  except (ValueError,binascii.Error): raise PlanError("Evolution media response is not valid Base64") from None
+ def api_plan(self, operation, instance=None, params=None, payload=None, query=None, file_path=None, file_field="file"):
+  spec=api_operation(operation)
+  if spec.restricted: raise PlanError("operation is restricted because its response contains credentials")
+  if spec.download_file: raise PlanError("operation returns media; use api download with --output-file")
+  return self.plan("api",self._api_request(operation,instance,params,payload,query,file_path,file_field))
+ def _api_request(self, operation, instance, params, payload, query, file_path=None, file_field="file"):
+  try: spec=api_operation(operation)
+  except ValueError as exc: raise PlanError(str(exc)) from None
+  if not all(value is None or isinstance(value,dict) for value in (params,payload,query)): raise PlanError("API params, payload, and query must be JSON objects")
+  request={"operation":operation,"instance":instance,"params":dict(params or {}),"payload":dict(payload or {}),"query":dict(query or {})}
+  if file_path is not None:
+   if not spec.upload_file: raise PlanError("operation does not accept a file upload")
+   request["file"]=self._api_file_metadata(file_path,file_field)
+  self._validate_api(request)
+  return request
+ def _api_file_metadata(self, file_path, file_field):
+  if not isinstance(file_field,str) or not file_field.strip(): raise PlanError("upload field is invalid")
+  try: path=Path(file_path).expanduser().resolve(strict=True)
+  except (OSError,TypeError,ValueError): raise PlanError("upload file cannot be read") from None
+  if not path.is_file(): raise PlanError("upload file cannot be read")
+  return {"path":str(path),"sha256":self._file_digest(path),"size":path.stat().st_size,"field":file_field}
+ @staticmethod
+ def _file_digest(path):
+  digest=hashlib.sha256()
+  with Path(path).open("rb") as handle:
+   for chunk in iter(lambda:handle.read(1024*1024),b""): digest.update(chunk)
+  return digest.hexdigest()
  def _envelope(self,envelope):
   if not isinstance(envelope,dict): raise PlanError("Evolution response is invalid")
   # Evolution 2.3.7 uses only direct bodies or one explicit data wrapper here.
@@ -49,7 +121,8 @@ class Service:
   if not isinstance(numbers,list) or not 1<=len(numbers)<=100: raise PlanError("numbers must contain between 1 and 100 phone numbers")
   values=list(dict.fromkeys(self._normalize_group_phone(value) for value in numbers))
   if self.mode=="demo": return {"numbers":[{"number":value,"exists":not self.store.blacklisted(value)} for value in values]}
-  return self._envelope(self.client.request("whatsapp_validate",instance,{"numbers":values}))
+  raw=self.client.request("whatsapp_validate",instance,{"numbers":values})
+  return raw if isinstance(raw,list) else self._envelope(raw)
  def webhook_info(self,instance):
   self._instance(instance)
   raw=self.store.state("last_webhook_set",{}).get("webhook",{}) if self.mode=="demo" else self._envelope(self.client.request("webhook_find",instance))
@@ -78,6 +151,7 @@ class Service:
   state=self._envelope(self.client.request("instance_status",name)); return str(state.get("instance",{}).get("state",state.get("state",""))).lower() in ("open","connected")
  def plan(self,kind,payload,ttl=900):
   self._validate_common(kind,payload)
+  if kind=="api": self._validate_api(payload)
   if kind in {"instance_create","instance_connect"} and payload.get("qr_file"):
    target=Path(payload["qr_file"]).resolve(); root=self.store.path.parent
    if target.suffix.lower()!='.png' or root not in target.parents: raise PlanError("qr_file must be a PNG inside the local state directory")
@@ -110,6 +184,36 @@ class Service:
    number=p["number"]
    try: p["number"] = self._group_jid(number) if isinstance(number,str) and "@" in number else self._normalize_group_phone(number)
    except PlanError: raise PlanError("message recipient is invalid") from None
+ def _validate_api(self,p):
+  required_fields={"operation","instance","params","payload","query"}
+  allowed_fields=required_fields|{"file"}
+  if not isinstance(p,dict) or not required_fields<=set(p) or set(p)-allowed_fields: raise PlanError("API request is invalid")
+  try:
+   operation=api_operation(p["operation"]); required_params=set(api_path_parameters(p["operation"]))
+  except ValueError as exc: raise PlanError(str(exc)) from None
+  if "instance" in required_params: self._instance(p["instance"])
+  elif p["instance"] is not None: raise PlanError("operation does not accept an instance")
+  if not all(isinstance(p[name],dict) and all(isinstance(key,str) for key in p[name]) for name in ("params","payload","query")): raise PlanError("API params, payload, and query must be JSON objects")
+  if set(p["params"])!=required_params-{"instance"}: raise PlanError("route parameters do not match operation")
+  for value in p["params"].values():
+   if not isinstance(value,str) or not value or any(char in value for char in "/\\?#") or any(ord(char)<32 or ord(char)==127 for char in value): raise PlanError("route parameter is invalid")
+  file=p.get("file")
+  if file is not None:
+   if not operation.upload_file or not isinstance(file,dict) or set(file)!={"path","sha256","size","field"}: raise PlanError("upload metadata is invalid")
+   if not isinstance(file["path"],str) or not Path(file["path"]).is_absolute() or not re.fullmatch(r"[0-9a-f]{64}",str(file["sha256"])) or not isinstance(file["size"],int) or file["size"]<0 or not isinstance(file["field"],str) or not file["field"].strip(): raise PlanError("upload metadata is invalid")
+  self._validate_api_targets(p["payload"])
+  self._validate_api_targets(p["query"])
+ def _validate_api_targets(self,value,key=None):
+  if isinstance(value,dict):
+   for child_key,child in value.items(): self._validate_api_targets(child,child_key)
+  elif isinstance(value,list):
+   for child in value: self._validate_api_targets(child,key)
+  elif key in {"number","phone","phoneNumber","phones","numbers","participants","remoteJid"} and isinstance(value,str):
+   if value.lower().endswith("@lid"): raise PlanError("@lid identities are read-only and cannot target an API mutation")
+   candidate=value.split("@",1)[0] if value.lower().endswith("@s.whatsapp.net") else value
+   try: phone=normalize_phone(candidate)
+   except ValueError: return
+   if self.store.blacklisted(phone): raise PlanError("target is blacklisted")
  def _validate_onboarding(self,p):
   creator=p.get("creator_instance"); members=p.get("participant_instances",[]); admins=p.get("admin_instances",[])
   if not creator or creator in members or creator in admins or set(members)&set(admins) or len(members)!=len(set(members)) or len(admins)!=len(set(admins)): raise PlanError("creator, participant_instances and admin_instances must be mutually separate")
@@ -163,6 +267,7 @@ class Service:
  def _execute(self,kind,p,checkpoint=None): return self._demo_execute(kind,p,checkpoint) if self.mode=="demo" else self._remote_execute(kind,p,checkpoint)
  def _demo_execute(self,kind,p,checkpoint=None):
   groups=self.store.state("groups",[])
+  if kind=="api": return {"status":"simulated","operation":p["operation"],"method":api_operation(p["operation"]).method}
   if kind=="instance_connect":
    items=self.instances(); found=next((x for x in items if x["name"]==p["instance"]),None)
    if not found: raise PlanError("demo instance not found")
@@ -219,6 +324,7 @@ class Service:
   if kind in {"message_text","message_media","webhook_set","invite_send"}: self.store.save_state("last_"+kind,p); return {"status":"simulated","operation":kind}
   raise PlanError("unknown planned operation")
  def _remote_execute(self,kind,p,checkpoint=None):
+  if kind=="api": return self._remote_api(p)
   if kind=="onboarding": return self._remote_onboarding(p,checkpoint)
   if kind=="group_setup": return self._remote_group_setup(p,checkpoint)
   if kind=="group_create" and p.get("existing_jid"):
@@ -250,6 +356,17 @@ class Service:
    return {"group_jid":jid,"status":"created"}
   if kind in {"instance_create","instance_connect"}: return self._sanitize_qr(result,p)
   return result
+ def _remote_api(self,p):
+  file=p.get("file")
+  if file:
+   path=Path(file["path"])
+   try: unchanged=path.is_file() and path.stat().st_size==file["size"] and self._file_digest(path)==file["sha256"]
+   except OSError: unchanged=False
+   if not unchanged: raise PlanError("planned upload file changed; create a new plan")
+  kwargs={"payload":p["payload"],"query":p["query"]}
+  if p["params"]: kwargs["params"]=p["params"]
+  if file: kwargs.update({"file_path":path,"file_field":file["field"]})
+  return self.client.request(p["operation"],p["instance"] or "",**kwargs)
  def _sanitize_qr(self,result,p):
   qr=result.get("qrcode",{}) if isinstance(result,dict) else {}; pairing=qr.get("pairingCode") or (result.get("pairingCode") if isinstance(result,dict) else None); saved=None
   if qr.get("base64") and p.get("qr_file"):

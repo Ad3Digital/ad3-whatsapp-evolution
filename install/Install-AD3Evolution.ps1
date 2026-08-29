@@ -93,7 +93,12 @@ function Test-TrustedArchive([string] $Archive, [string] $ExpectedHash, [string]
 }
 function Get-Checks {
     $wsl=Get-WslVersion; $daemon=$false; $compose=$false; $cli=[bool](Get-Command docker -ErrorAction SilentlyContinue)
-    if($cli){& docker info 2>$null|Out-Null;$daemon=($LASTEXITCODE -eq 0);if($daemon){& docker compose version 2>$null|Out-Null;$compose=($LASTEXITCODE -eq 0)}}
+    if($cli){
+        try { & docker info 2>$null | Out-Null; $daemon=($LASTEXITCODE -eq 0) } catch { $daemon=$false }
+        if($daemon){
+            try { & docker compose version 2>$null | Out-Null; $compose=($LASTEXITCODE -eq 0) } catch { $compose=$false }
+        }
+    }
     return @([pscustomobject]@{check='Windows';ok=($env:OS -eq 'Windows_NT')},[pscustomobject]@{check='x64/ARM64';ok=($env:PROCESSOR_ARCHITECTURE -match 'AMD64|ARM64')},[pscustomobject]@{check='RAM >= 8 GB';ok=((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1GB -ge 8)},[pscustomobject]@{check='Disk >= 15 GB';ok=((Get-PSDrive -Name C).Free/1GB -ge 15)},[pscustomobject]@{check='Virtualization firmware';ok=[bool]((Get-CimInstance Win32_Processor|Select-Object -First 1).VirtualizationFirmwareEnabled)},[pscustomobject]@{check='WSL >= 2.1.5';ok=([bool]$wsl -and $wsl -ge [version]'2.1.5')},[pscustomobject]@{check='Docker CLI';ok=$cli},[pscustomobject]@{check='Docker daemon';ok=$daemon},[pscustomobject]@{check='Docker Compose';ok=$compose},[pscustomobject]@{check='Port 8080 free';ok=(-not(Get-NetTCPConnection -LocalPort 8080 -ErrorAction SilentlyContinue))})
 }
 function Test-Checksums([string] $Root) {

@@ -13,6 +13,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 PHONE = re.compile(r"(?<!\d)(?:\+?\d[\d .()\-]{7,}\d)(?!\d)")
 SECRET = re.compile(r"(?i)(apikey|api_key|authorization|token|password|secret)\s*[:=]\s*([^\s,]+)")
+_BASE64_DATA_URL = re.compile(r"^data:[^,]*;base64,[A-Za-z0-9+/=_-]+$", re.I)
+_LONG_BASE64 = re.compile(r"^[A-Za-z0-9+/=_-]{256,}$")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _GROUP_JID = re.compile(r"^[^@\s/\\?#]+@g\.us$", re.I)
 _INDIVIDUAL_JID = re.compile(r"^\d{10,15}@s\.whatsapp\.net$", re.I)
@@ -124,13 +126,21 @@ def decrypt(value: str | None, key: bytes, aad: str) -> Any:
 
 def redact(value: Any) -> Any:
     if isinstance(value, dict):
-        return {k: ("[REDACTED]" if re.search(r"(?i)(key|token|secret|password|authorization)", k) else redact(v)) for k, v in value.items()}
+        result = {}
+        for key, item in value.items():
+            key_text = str(key)
+            secret_key = re.search(r"(?i)(key|token|secret|password|authorization)", key_text)
+            binary_key = "base64" in key_text.lower() and isinstance(item, str)
+            result[key] = "[REDACTED]" if secret_key or binary_key else redact(item)
+        return result
     if isinstance(value, list):
-        return [redact(v) for v in value]
+        return [redact(item) for item in value]
     if not isinstance(value, str):
         return value
-    value = SECRET.sub(lambda m: f"{m.group(1)}=[REDACTED]", value)
-    return PHONE.sub(lambda m: "***" + re.sub(r"\D", "", m.group(0))[-4:], value)
+    value = SECRET.sub(lambda match: f"{match.group(1)}=[REDACTED]", value)
+    if _BASE64_DATA_URL.fullmatch(value) or _LONG_BASE64.fullmatch(value):
+        return "[REDACTED]"
+    return PHONE.sub(lambda match: "***" + re.sub(r"\D", "", match.group(0))[-4:], value)
 
 
 def redact_audit(value: Any) -> Any:
