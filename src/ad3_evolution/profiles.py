@@ -66,6 +66,19 @@ IDEMPOTENT = {
 }
 MUTATING = set(ROUTES) - IDEMPOTENT
 
+# Leituras que varrem a conta inteira nao cabem no timeout padrao: numa conta com
+# muitos grupos, `fetchAllGroups` estoura os 10s, as tres tentativas de leitura
+# repetem o estouro e o operador recebe uma falha generica depois de meio minuto.
+# O piso vale por operacao; um `EVOLUTION_TIMEOUT` maior continua prevalecendo.
+SLOW_READS = {
+    "group_list": 90.0,
+    "group.fetch-all": 90.0,
+    "chat_list": 30.0,
+    "chat.find-chats": 30.0,
+    "message_history": 30.0,
+    "chat.find-messages": 30.0,
+}
+
 
 # Every client-callable route from the upstream 2.3.7 tag. Inbound webhook
 # receivers, the Manager UI, and metrics are server surfaces, not CLI calls.

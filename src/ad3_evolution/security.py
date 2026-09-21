@@ -19,6 +19,11 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _GROUP_JID = re.compile(r"^[^@\s/\\?#]+@g\.us$", re.I)
 _INDIVIDUAL_JID = re.compile(r"^\d{10,15}@s\.whatsapp\.net$", re.I)
 _LID_JID = re.compile(r"^[^@\s/\\?#]+@lid$", re.I)
+# Um JID de grupo moderno e so um identificador opaco e nao revela ninguem, entao
+# ele sai inteiro: sem isso, `chat list` devolve o grupo mascarado e o JID nao pode
+# ser passado para `chat messages`. O formato legado `<telefone>-<timestamp>@g.us`
+# carrega o numero de quem criou o grupo e continua sendo mascarado.
+_OPAQUE_GROUP_JID = re.compile(r"^\d{15,25}@g\.us$", re.I)
 
 
 def canonical(value: Any) -> str:
@@ -140,6 +145,8 @@ def redact(value: Any) -> Any:
     value = SECRET.sub(lambda match: f"{match.group(1)}=[REDACTED]", value)
     if _BASE64_DATA_URL.fullmatch(value) or _LONG_BASE64.fullmatch(value):
         return "[REDACTED]"
+    if _OPAQUE_GROUP_JID.fullmatch(value):
+        return value
     return PHONE.sub(lambda match: "***" + re.sub(r"\D", "", match.group(0))[-4:], value)
 
 

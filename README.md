@@ -69,6 +69,18 @@ UTF-8 para dados sensíveis, pois `--payload` fica exposto ao histórico do
 shell. Respostas com Base64, token, chave, senha ou autorização são redigidas
 antes de qualquer saída.
 
+A redação mascara número de telefone, inclusive o JID individual e o `@lid`, e
+também o JID de grupo no formato legado `<telefone>-<timestamp>@g.us`, que
+carrega o número de quem criou o grupo. O JID de grupo moderno, só dígitos, é um
+identificador opaco e sai inteiro: ele é o que `chat list` devolve e o que
+`chat messages` exige, então mascará-lo quebraria a própria leitura.
+
+Leituras que varrem a conta inteira têm um piso de timeout próprio — 90s para
+`group list` e 30s para as leituras de chat —, porque numa conta com muitos
+grupos `fetchAllGroups` não cabe nos 10s padrão. `EVOLUTION_TIMEOUT` maior que o
+piso continua prevalecendo. Falha de rede, rota ou instância chega ao operador
+com a causa já sanitizada, em vez de uma mensagem genérica.
+
 Os payloads continuam iguais aos do contrato oficial. O catálogo deliberadamente
 não cria uma segunda sintaxe por endpoint: isso mantém a cobertura completa sem
 inventar campos nem permitir URL ou método arbitrários.

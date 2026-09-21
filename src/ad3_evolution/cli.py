@@ -5,10 +5,10 @@ from pathlib import Path
 from . import __version__
 from .agent_protocol import capabilities, encode_jsonl, run_batch
 from .branding import banner, donation_text
-from .client import EvolutionClient
+from .client import EvolutionClient, EvolutionError
 from .config import Config
 from .profiles import api_catalog
-from .security import redact
+from .security import redact, safe_error
 from .service import Service
 from .store import Store, PlanError
 
@@ -134,7 +134,23 @@ def parser():
  demo=sub.add_parser("demo").add_subparsers(dest="demo_cmd",required=True); demo.add_parser("reset"); demo.add_parser("status")
  return p
 
+def utf8_stdio():
+ """Escreve a saida em UTF-8 mesmo num console Windows em cp1252.
+
+ `out` usa `ensure_ascii=False` para nao transformar acento e emoji em escapes.
+ Num PowerShell pt-BR o stdout assume cp1252 e qualquer mensagem com emoji morre
+ com UnicodeEncodeError depois da chamada de rede ja ter acontecido - a leitura
+ foi feita e o operador nao ve nada. O terminal decide como desenhar; o processo
+ nao pode decidir falhar.
+ """
+ for stream in (sys.stdout, sys.stderr):
+  encoding=getattr(stream,"encoding",None) or ""
+  if encoding.lower().replace("-","") in {"utf8","utf8sig"}: continue
+  try: stream.reconfigure(encoding="utf-8",errors="backslashreplace")
+  except (AttributeError,OSError,ValueError): pass
+
 def main(argv=None):
+ utf8_stdio()
  raw_argv=list(sys.argv[1:] if argv is None else argv)
  if not raw_argv:
   print(banner()); parser().print_help(); return 0
@@ -205,5 +221,9 @@ def main(argv=None):
   if a.demo_cmd=="reset": s.store.reset(); out({"status":"reset"},a.pretty); return 0
   out({"instances":s.instances(),"groups":s.store.state("groups",[])},a.pretty); return 0
  except (PlanError, ValueError) as e: print(f"error: {e}",file=sys.stderr); return 2
+ # A mensagem de EvolutionError ja passa por safe_error; esconde-la atras de
+ # "operation failed safely" so tira do operador a diferenca entre timeout,
+ # rota errada e instancia desconectada.
+ except EvolutionError as e: print(f"error: {safe_error(e)}",file=sys.stderr); return 1
  except Exception as e: print("error: operation failed safely",file=sys.stderr); return 1
  finally: s.store.close()

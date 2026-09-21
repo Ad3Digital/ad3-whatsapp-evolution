@@ -10,7 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-from .profiles import API_OPERATIONS, IDEMPOTENT, ROUTES
+from .profiles import API_OPERATIONS, IDEMPOTENT, ROUTES, SLOW_READS
 from .security import safe_error, validate_instance
 
 
@@ -53,10 +53,11 @@ class EvolutionClient:
         if self.api_key:
             headers["apikey"] = self.api_key
         attempts = 3 if read_only else 1
+        timeout = max(self.timeout, SLOW_READS.get(operation, 0.0))
         for attempt in range(attempts):
             try:
                 request = Request(url, data=body, method=method, headers=headers)
-                with urlopen(request, timeout=self.timeout) as response:
+                with urlopen(request, timeout=timeout) as response:
                     raw = response.read().decode("utf-8")
                     return json.loads(raw) if raw else {}
             except (URLError, HTTPError, TimeoutError) as exc:

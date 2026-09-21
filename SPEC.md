@@ -25,6 +25,21 @@ não existe URL, método ou dispatch arbitrário. Upload multipart registra cami
 tamanho e SHA-256 no plano cifrado e a aplicação falha fechada se o arquivo
 mudar. Saídas redigem Base64, token, chave, senha e autorização.
 
+Na versão 0.4.1, a redação é por identificador, não por comprimento do dígito: telefone, JID
+individual, `@lid` e o JID de grupo legado `<telefone>-<timestamp>@g.us` saem
+mascarados; o JID de grupo moderno, `^\d{15,25}@g\.us$`, é opaco e sai inteiro,
+porque ele atravessa `chat list` → `chat messages` e mascará-lo inutilizaria a
+leitura sem proteger ninguém.
+
+Leituras de varredura têm piso de timeout declarado em `profiles.SLOW_READS`
+(90s para `group_list`, 30s para as leituras de chat). O piso só eleva:
+`EVOLUTION_TIMEOUT` acima dele continua valendo. `EvolutionError` chega ao
+operador com a causa sanitizada; a mensagem genérica fica reservada às exceções
+inesperadas, que podem carregar conteúdo não previsto. Ainda na 0.4.1, toda
+saída da CLI é escrita em UTF-8 mesmo num console Windows em cp1252: a resposta
+já foi lida da API quando o terminal tenta desenhá-la, e o processo não pode
+decidir falhar ali.
+
 ## Protocolo local para agentes v1
 
 Na versão 0.3.0, a CLI inclui `ad3-evolution.agent/v1`: lote UTF-8 de objeto,

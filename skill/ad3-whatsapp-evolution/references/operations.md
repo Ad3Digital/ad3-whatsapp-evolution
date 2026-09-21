@@ -1,4 +1,4 @@
-# Operações v0.4.0
+# Operações v0.4.1
 
 Perfil suportado: Evolution 2.3.7. Configure remote/local somente por ambiente
 ou `.env` local; não coloque segredos na linha de comando.
@@ -20,6 +20,12 @@ ad3-evolution webhook get --instance X
 conferir admins e a presença de `phoneNumber`; uma identidade somente `@lid`
 não autoriza mutação. Histórico de chat aceita grupo, JID individual e `@lid`
 apenas para leitura.
+
+`chat list` devolve o JID de grupo moderno inteiro, então ele pode ser passado
+direto para `chat messages` quando o grupo ainda não está no registry. Telefone,
+JID individual, `@lid` e o JID de grupo legado `<telefone>-<timestamp>@g.us`
+continuam mascarados. `group list` varre a conta toda e tem timeout próprio de
+90s; use-o para descobrir um grupo, não em laço.
 
 Webhook get é sanitizado. Set-plan exige HTTPS, salvo `localhost`/`127.0.0.1`,
 rejeita query, fragmento, userinfo e headers nesta versão, e aceita somente os

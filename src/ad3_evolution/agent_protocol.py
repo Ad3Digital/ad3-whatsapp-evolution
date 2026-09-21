@@ -10,6 +10,7 @@ import json
 import re
 from typing import Any, Iterable
 
+from .client import EvolutionError
 from .security import redact, safe_error, validate_chat_jid
 from .store import PlanError
 
@@ -251,7 +252,7 @@ def run_batch(service: Any, raw: bytes) -> tuple[list[dict[str, Any]], bool]:
         except ProtocolError as exc:
             results.append(response(request_id, False, error=exc))
             failed = True
-        except (PlanError, ValueError) as exc:
+        except (PlanError, ValueError, EvolutionError) as exc:
             results.append(response(request_id, False, error=ProtocolError("operation_failed", safe_error(exc))))
             failed = True
         except Exception:

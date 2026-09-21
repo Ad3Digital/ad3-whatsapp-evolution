@@ -1,15 +1,15 @@
 import _bootstrap
-import pathlib, tempfile, threading, unittest, base64, sqlite3
+import pathlib, tempfile, threading, unittest, base64, sqlite3, io, sys, contextlib
 from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import MagicMock, patch
 from ad3_evolution.store import Store, PlanError
 from ad3_evolution.service import Service
 from ad3_evolution.security import redact, validate_chat_jid
-from ad3_evolution.client import EvolutionClient
-from ad3_evolution.profiles import ROUTES
+from ad3_evolution.client import EvolutionClient, EvolutionError
+from ad3_evolution.profiles import ROUTES, SLOW_READS
 from ad3_evolution.license import verify_manifest, safe_relative
-from ad3_evolution.cli import main as cli_main, parser
+from ad3_evolution.cli import main as cli_main, out, parser, utf8_stdio
 
 class CoreTests(unittest.TestCase):
  def setUp(self): self.tmp=tempfile.TemporaryDirectory(); self.store=Store(pathlib.Path(self.tmp.name)/'x.db'); self.s=Service(self.store,'demo')
@@ -151,3 +151,55 @@ class HttpTests(unittest.TestCase):
     result=EvolutionClient(f'http://127.0.0.1:{srv.server_port}','key').request('message.send-media','creator',payload={'number':'5511888888888','mediatype':'image'},file_path=file)
     self.assertTrue(result["ok"]);self.assertEqual(seen["path"],"/message/sendMedia/creator");self.assertTrue(seen["type"].startswith("multipart/form-data; boundary="));self.assertIn(b'name="number"',seen["body"]);self.assertIn(b'image-bytes',seen["body"])
   finally: srv.shutdown();t.join();srv.server_close()
+
+class RegressionTests(unittest.TestCase):
+ def test_redaction_keeps_opaque_group_jid_and_masks_the_legacy_one(self):
+  chat={'remoteJid':'120363000000000001@g.us','pushName':'Grupo','phone':'5511999999999'}
+  redacted=redact(chat)
+  self.assertEqual(redacted['remoteJid'],'120363000000000001@g.us')
+  self.assertNotIn('5511999999999',redacted['phone'])
+  self.assertNotIn('5511999999999',redact('5511999999999-1600000000@g.us'))
+  self.assertEqual(redact(['120363000000000002@g.us']),['120363000000000002@g.us'])
+ def test_group_jid_survives_a_round_trip_into_chat_messages(self):
+  jid=redact({'remoteJid':'120363000000000001@g.us'})['remoteJid']
+  self.assertEqual(validate_chat_jid(jid),'120363000000000001@g.us')
+ def test_slow_read_raises_the_timeout_floor_without_lowering_a_custom_one(self):
+  seen=[]
+  def fake_urlopen(request,timeout=None): seen.append(timeout); raise TimeoutError('read timed out')
+  client=EvolutionClient('http://127.0.0.1:1','key',timeout=10)
+  with patch('ad3_evolution.client.urlopen',fake_urlopen):
+   with self.assertRaises(EvolutionError): client.request('group_list','creator')
+   with self.assertRaises(EvolutionError): client.request('instance_status','creator')
+  self.assertEqual(seen[0],SLOW_READS['group_list']); self.assertEqual(seen[-1],10)
+  patient=EvolutionClient('http://127.0.0.1:1','key',timeout=120)
+  with patch('ad3_evolution.client.urlopen',fake_urlopen):
+   with self.assertRaises(EvolutionError): patient.request('group_list','creator')
+  self.assertEqual(seen[-1],120)
+ def test_cli_names_the_evolution_failure_instead_of_the_generic_message(self):
+  err=io.StringIO()
+  with patch('ad3_evolution.service.Service.group_list',side_effect=EvolutionError('Evolution request failed: The read operation timed out')):
+   with contextlib.redirect_stderr(err):
+    code=cli_main(['--mode','demo','group','list','--instance','creator'])
+  self.assertEqual(code,1); self.assertIn('timed out',err.getvalue()); self.assertNotIn('operation failed safely',err.getvalue())
+ def test_cli_keeps_a_secret_bearing_failure_generic(self):
+  err=io.StringIO()
+  with patch('ad3_evolution.service.Service.group_list',side_effect=RuntimeError('apikey=super-secret')):
+   with contextlib.redirect_stderr(err):
+    code=cli_main(['--mode','demo','group','list','--instance','creator'])
+  self.assertEqual(code,1); self.assertIn('operation failed safely',err.getvalue()); self.assertNotIn('super-secret',err.getvalue())
+ def test_utf8_stdio_reconfigures_a_cp1252_console_and_leaves_utf8_alone(self):
+  class Stream:
+   def __init__(self,encoding): self.encoding=encoding; self.calls=[]
+   def reconfigure(self,**kwargs): self.calls.append(kwargs); self.encoding=kwargs['encoding']
+  console,already=Stream('cp1252'),Stream('utf-8')
+  with patch.object(sys,'stdout',console), patch.object(sys,'stderr',already): utf8_stdio()
+  self.assertEqual(console.calls,[{'encoding':'utf-8','errors':'backslashreplace'}]); self.assertEqual(already.calls,[])
+ def test_utf8_stdio_survives_a_stream_that_cannot_be_reconfigured(self):
+  class Frozen:
+   encoding='cp1252'
+   def reconfigure(self,**kwargs): raise OSError('detached')
+  with patch.object(sys,'stdout',Frozen()), patch.object(sys,'stderr',Frozen()): utf8_stdio()
+ def test_emoji_reaches_stdout_without_a_unicode_error(self):
+  buffer=io.TextIOWrapper(io.BytesIO(),encoding='utf-8',errors='backslashreplace')
+  with contextlib.redirect_stdout(buffer): out({'message':'Reunião 🔔'})
+  buffer.seek(0); self.assertIn('Reunião 🔔',buffer.read())
