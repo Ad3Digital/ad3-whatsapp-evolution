@@ -83,7 +83,7 @@ def parser():
  status_plan=sub.add_parser("plan-status"); status_plan.add_argument("--id",required=True)
  inst=sub.add_parser("instance").add_subparsers(dest="instance_cmd",required=True)
  inst.add_parser("list"); status=inst.add_parser("status"); status.add_argument("--instance",required=True); con=inst.add_parser("connect-plan"); con.add_argument("--instance",required=True); con.add_argument("--qr-file"); ic=inst.add_parser("create-plan"); ic.add_argument("--instance",required=True); ic.add_argument("--qr-file")
- chat=sub.add_parser("chat").add_subparsers(dest="chat_cmd",required=True); chat_list=chat.add_parser("list"); chat_list.add_argument("--instance",required=True); chat_list.add_argument("--limit",default=20); chat_messages=chat.add_parser("messages"); chat_messages.add_argument("--instance",required=True); chat_messages.add_argument("--jid",required=True); chat_messages.add_argument("--limit",default=20)
+ chat=sub.add_parser("chat").add_subparsers(dest="chat_cmd",required=True); chat_list=chat.add_parser("list"); chat_list.add_argument("--instance",required=True); chat_list.add_argument("--limit",default=20); chat_messages=chat.add_parser("messages"); chat_messages.add_argument("--instance",required=True); chat_messages.add_argument("--jid",required=True); chat_messages.add_argument("--limit",default=20); recipient=chat.add_parser("recipient"); recipient.add_argument("--instance",required=True); recipient.add_argument("--chat-id",required=True)
  group=sub.add_parser("group").add_subparsers(dest="group_cmd",required=True); gl=group.add_parser("list"); gl.add_argument("--instance",required=True); info=group.add_parser("info"); info.add_argument("--instance",required=True); info.add_argument("--jid",required=True); participants=group.add_parser("participants"); participants.add_argument("--instance",required=True); participants.add_argument("--jid",required=True)
  create=group.add_parser("create"); create.add_argument("--instance",required=True); create.add_argument("--subject",required=True); create.add_argument("--existing-jid"); create.add_argument("--phone",dest="phones",action="append",default=[])
  setup=group.add_parser("setup-plan"); setup.add_argument("--instance",required=True); setup.add_argument("--subject",required=True); setup.add_argument("--description",default=""); setup.add_argument("--picture"); setup.add_argument("--existing-jid"); setup.add_argument("--phone",dest="phones",action="append",default=[]); setup.add_argument("--participant-instance",action="append",default=[]); setup.add_argument("--admin-instance",action="append",default=[]); setup.add_argument("--setting",action="append",default=[])
@@ -98,7 +98,7 @@ def parser():
  resolve=invite.add_parser("resolve"); resolve.add_argument("--instance",required=True); resolve.add_argument("--code",required=True)
  leave=group.add_parser("leave"); leave.add_argument("--instance",required=True); leave.add_argument("--jid",required=True)
  msg=sub.add_parser("message").add_subparsers(dest="message_cmd",required=True)
- x=msg.add_parser("plan-text"); x.add_argument("--instance",required=True); x.add_argument("--number",required=True); x.add_argument("--content"); x.add_argument("--content-file",dest="content_file")
+ x=msg.add_parser("plan-text"); x.add_argument("--instance",required=True); target=x.add_mutually_exclusive_group(required=True); target.add_argument("--number"); target.add_argument("--chat-id"); x.add_argument("--content"); x.add_argument("--content-file",dest="content_file")
  x=msg.add_parser("plan-media"); x.add_argument("--instance",required=True); x.add_argument("--number",required=True); x.add_argument("--mediatype",required=True); x.add_argument("--media",required=True); x.add_argument("--caption",default=""); x.add_argument("--file-name"); x.add_argument("--mimetype")
  number=sub.add_parser("number").add_subparsers(dest="number_cmd",required=True); check=number.add_parser("check"); check.add_argument("--instance",required=True); check.add_argument("--number",dest="numbers",action="append",required=True)
  webhook=sub.add_parser("webhook").add_subparsers(dest="webhook_cmd",required=True); get=webhook.add_parser("get"); get.add_argument("--instance",required=True); set_plan=webhook.add_parser("set-plan"); set_plan.add_argument("--instance",required=True); set_plan.add_argument("--url",required=True); set_plan.add_argument("--event",dest="events",action="append",default=[]); set_plan.add_argument("--enabled",action=argparse.BooleanOptionalAction,default=True); set_plan.add_argument("--by-events",dest="by_events",action=argparse.BooleanOptionalAction,default=True); set_plan.add_argument("--base64",action=argparse.BooleanOptionalAction,default=False)
@@ -186,6 +186,7 @@ def main(argv=None):
    out(s.plan("instance_create" if a.instance_cmd=="create-plan" else "instance_connect",{"instance":a.instance,"qr_file":a.qr_file}),a.pretty); return 0
   if a.cmd=="chat":
    if a.chat_cmd=="list": out(s.chat_list(a.instance,a.limit),a.pretty); return 0
+   if a.chat_cmd=="recipient": out({"chat_id":a.chat_id,"phone":s.recipient_from_chat(a.instance,a.chat_id)},a.pretty); return 0
    out(s.message_history(a.instance,a.jid,a.limit),a.pretty); return 0
   if a.cmd=="group":
    if a.group_cmd=="list": out(s.group_list(a.instance),a.pretty); return 0
@@ -203,7 +204,7 @@ def main(argv=None):
     out(s.plan("invite_revoke",{"instance":a.instance,"groupJid":a.jid}),a.pretty); return 0
    out(s.plan("group_leave",{"instance":a.instance,"groupJid":a.jid}),a.pretty); return 0
   if a.cmd=="message":
-   payload={"instance":a.instance,"number":a.number}
+   payload={"instance":a.instance,"number":s.recipient_from_chat(a.instance,a.chat_id) if a.message_cmd=="plan-text" and a.chat_id else a.number}
    if a.message_cmd=="plan-text": payload["content"]=read_message(a.content,a.content_file)
    else: payload.update({"mediatype":a.mediatype,"media":a.media,"caption":a.caption,"fileName":a.file_name,"mimetype":a.mimetype})
    out(s.plan("message_"+a.message_cmd.removeprefix("plan-"),payload),a.pretty); return 0

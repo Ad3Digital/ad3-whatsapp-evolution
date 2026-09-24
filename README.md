@@ -120,6 +120,18 @@ Criação/configuração de grupos, participantes, admins, settings, mensagens,
 onboarding e webhook seguem esse fluxo. `@lid` só é aceito em leituras de chat;
 mutações exigem telefone válido.
 
+Quando a conversa tiver apenas `@lid`, use o ID opaco de `chat list`:
+
+```powershell
+ad3-evolution chat recipient --instance aula --chat-id ID_DA_CONVERSA
+ad3-evolution message plan-text --instance aula --chat-id ID_DA_CONVERSA `
+  --content-file mensagem.txt
+```
+
+A CLI associa nome e foto da conversa a exatamente um contato telefônico; se
+faltar um dado ou houver ambiguidade, não cria o plano. A saída mascara o
+telefone. Nunca use `@lid` diretamente como destinatário.
+
 `webhook get` retorna estado, eventos, flags, origem e hash do destino, sem URL
 integral, query, userinfo ou headers. O protocolo também oferece `number.check`,
 `group.participants` e `group.invite.resolve` como gates de leitura.

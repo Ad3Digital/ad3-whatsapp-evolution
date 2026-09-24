@@ -41,6 +41,25 @@ class Operations(unittest.TestCase):
   group=self.demo.plan('message_text',{'number':'x@g.us','content':'grupo'}); self.assertEqual(self.demo.apply(group['id'],group['id'])['status'],'simulated')
   self.store.blacklist('+5511888888888')
   with self.assertRaises(PlanError): self.demo.plan('message_text',{'number':'5511888888888@s.whatsapp.net','content':'bloqueada'})
+ def test_chat_recipient_requires_one_matching_phone_and_photo(self):
+  class Contacts:
+   def __init__(self): self.phones=['5511888888888@s.whatsapp.net']
+   def request(self,op,instance='',payload=None,query=None):
+    if op=='chat_list': return [{'id':'chat-12345','profilePicUrl':'https://photo','lastMessage':{'pushName':'Ingrid'}}]
+    if op=='chat.find-contacts': return [{'pushName':'Ingrid','profilePicUrl':'https://photo','remoteJid':jid} for jid in self.phones]
+    raise AssertionError(op)
+  client=Contacts(); service=Service(self.store,'remote',client)
+  self.assertEqual(service.recipient_from_chat('aula','chat-12345'),'5511888888888')
+  client.phones.append('5511999999999@s.whatsapp.net')
+  with self.assertRaises(PlanError): service.recipient_from_chat('aula','chat-12345')
+  client.phones=['5511888888888@s.whatsapp.net']
+  original=client.request
+  def wrong_photo(op,*args,**kwargs):
+   result=original(op,*args,**kwargs)
+   if op=='chat.find-contacts': result[0]['profilePicUrl']='https://other'
+   return result
+  client.request=wrong_photo
+  with self.assertRaises(PlanError): service.recipient_from_chat('aula','chat-12345')
  def test_webhook(self):
   payload={'instance':'creator','webhook':{'enabled':True,'url':'http://localhost/hook','headers':{},'byEvents':True,'base64':False,'events':['MESSAGES_UPSERT','MESSAGES_UPSERT']}}
   self.mutate('webhook_set',payload); self.assertEqual(self.store.state('last_webhook_set',{})['webhook']['events'],['MESSAGES_UPSERT']); self.assertEqual(self.demo.webhook_info('creator')['origin'],'http://localhost')

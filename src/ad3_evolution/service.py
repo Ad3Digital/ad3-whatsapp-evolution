@@ -133,6 +133,25 @@ class Service:
   if self.mode=="demo": return self.store.state("chats",[])[:limit]
   self._instance(instance)
   return self.client.request("chat_list",instance,{"take":limit})
+ def recipient_from_chat(self,instance,chat_id):
+  if not isinstance(chat_id,str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,80}",chat_id): raise PlanError("chat id is invalid")
+  chats=self._items(self.chat_list(instance,100),"chats")
+  matches=[item for item in chats if isinstance(item,dict) and item.get("id")==chat_id]
+  if len(matches)!=1: raise PlanError("chat id was not found uniquely in recent chats")
+  chat=matches[0]
+  name=chat.get("pushName") or (chat.get("lastMessage") or {}).get("pushName")
+  picture=chat.get("profilePicUrl")
+  if not isinstance(name,str) or not name or not isinstance(picture,str) or not picture: raise PlanError("chat identity lacks name or photo")
+  contacts=self._items(self.api_read("chat.find-contacts",instance,payload={"where":{"pushName":name}}),"contacts")
+  phones=set()
+  for item in contacts:
+   if not isinstance(item,dict) or item.get("pushName")!=name or item.get("profilePicUrl")!=picture or item.get("isGroup"): continue
+   jid=item.get("remoteJid","")
+   if isinstance(jid,str) and jid.endswith("@s.whatsapp.net"):
+    try: phones.add(normalize_phone(jid))
+    except ValueError: pass
+  if len(phones)!=1: raise PlanError("chat identity does not resolve to one phone contact")
+  return phones.pop()
  def message_history(self,instance,jid,limit):
   limit=self._read_limit(limit)
   self._instance(instance)
