@@ -71,6 +71,44 @@ class Operations(unittest.TestCase):
   r.request=missing_phone; s=Service(self.store,'remote',r); p=s.plan('group_setup',{'instance':'creator','subject':'G','participant_instances':['client'],'admin_instances':['support']})
   with self.assertRaises(PlanError): s.apply(p['id'],p['id'])
   self.assertFalse({'group_create','participants_add','participants_promote'} & {call[0] for call in r.calls})
+ def test_group_setup_uses_owner_jid_only_when_instance_is_connected(self):
+  r=Recorder(); original=r.request
+  def owner_jid_only(op,instance='',*args,**kwargs):
+   if op=='instance_list': return [{'name':'creator','ownerJid':'5511000000001@s.whatsapp.net'},{'name':'client','ownerJid':'5511000000002@s.whatsapp.net'},{'name':'support','ownerJid':'5511000000003@s.whatsapp.net'}]
+   return original(op,instance,*args,**kwargs)
+  r.request=owner_jid_only; s=Service(self.store,'remote',r)
+  p=s.plan('group_setup',{'instance':'creator','subject':'Webinar','participant_instances':['client'],'admin_instances':['support']})
+  self.assertEqual(s.apply(p['id'],p['id'])['status'],'configured')
+  create=next(x[2] for x in r.calls if x[0]=='group_create'); self.assertEqual(create['participants'],['5511000000002','5511000000003'])
+  r=Recorder(); original=r.request
+  def support_offline(op,instance='',*args,**kwargs):
+   if op=='instance_status': return {'state':'open' if instance!='support' else 'close'}
+   return owner_jid_only(op,instance,*args,**kwargs)
+  r.request=support_offline; s=Service(self.store,'remote',r)
+  p=s.plan('group_setup',{'instance':'creator','subject':'Webinar 3','admin_instances':['support']})
+  with self.assertRaises(PlanError) as caught: s.apply(p['id'],p['id'])
+  self.assertIn('phoneNumber unavailable',str(caught.exception)); self.assertNotIn('group_create',[x[0] for x in r.calls])
+ def test_message_delete_plan_targets_only_own_messages_and_hides_ids(self):
+  r=Recorder(); original=r.request
+  history={'messages':{'records':[
+   {'messageTimestamp':30,'key':{'id':'SECRET-A','remoteJid':'x@g.us','fromMe':True},'messageType':'conversation','message':{'conversation':'primeira'}},
+   {'messageTimestamp':31,'key':{'id':'SECRET-B','remoteJid':'x@g.us','fromMe':False},'messageType':'conversation','message':{'conversation':'do cliente'}},
+   {'messageTimestamp':10,'key':{'id':'SECRET-C','remoteJid':'x@g.us','fromMe':True},'messageType':'conversation','message':{'conversation':'antiga'}},
+   {'messageTimestamp':32,'key':{'id':'SECRET-D','remoteJid':'x@g.us','fromMe':True,'participant':'5511000000001@s.whatsapp.net'},'messageType':'conversation','message':{'extendedTextMessage':{'text':'segunda'}}}]}}
+  def with_history(op,*args,**kwargs):
+   if op=='message_history': return history
+   return original(op,*args,**kwargs)
+  r.request=with_history; s=Service(self.store,'remote',r)
+  plan=s.message_delete_plan('creator','x@g.us',20)
+  self.assertEqual(plan['preview']['count'],2); self.assertEqual([x['preview'] for x in plan['preview']['messages']],['primeira','segunda'])
+  self.assertNotIn('SECRET',repr(plan)); self.assertNotIn('message_delete',[x[0] for x in r.calls])
+  result=s.apply(plan['id'],plan['id'])
+  self.assertEqual(result['status'],'deleted'); self.assertNotIn('SECRET',repr(result))
+  deletes=[x[2] for x in r.calls if x[0]=='message_delete']
+  self.assertEqual(deletes,[{'id':'SECRET-A','remoteJid':'x@g.us','fromMe':True},{'id':'SECRET-D','remoteJid':'x@g.us','fromMe':True,'participant':'5511000000001@s.whatsapp.net'}])
+  with self.assertRaises(PlanError): s.apply(plan['id'],plan['id'])
+  with self.assertRaises(PlanError): s.message_delete_plan('creator','5511@lid',0)
+  with self.assertRaises(PlanError): s.message_delete_plan('creator','x@g.us',99)
  def test_onboarding_rejects_owner_fallback_before_group_creation(self):
   r=Recorder(); original=r.request
   def missing_phone(op,*args,**kwargs):

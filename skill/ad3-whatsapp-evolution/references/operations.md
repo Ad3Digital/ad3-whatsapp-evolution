@@ -27,6 +27,18 @@ JID individual, `@lid` e o JID de grupo legado `<telefone>-<timestamp>@g.us`
 continuam mascarados. `group list` varre a conta toda e tem timeout próprio de
 90s; use-o para descobrir um grupo, não em laço.
 
+`message delete-plan` apaga para todos somente mensagens enviadas pela própria
+instância (`fromMe`) desde `--min-ts`. O plano guarda as mensagens escolhidas,
+cifradas no store, e a prévia mostra horário e início do texto, nunca o ID
+externo. O `apply` apaga exatamente essas, sem buscar de novo. Chat `@lid` falha
+fechado. O WhatsApp deixa o aviso "mensagem apagada".
+
+Participante ou admin por instância usa `phoneNumber` do dono. A Evolution 2.3.x
+não devolve esse campo, então o `ownerJid` é aceito apenas com a instância
+conectada. Desconectada, o `ownerJid` pode ser de uma sessão antiga, e o plano
+falha antes de criar o grupo. Nesse caso, use `--phone` e promova depois com
+`group update participants --action promote`.
+
 Webhook get é sanitizado. Set-plan exige HTTPS, salvo `localhost`/`127.0.0.1`,
 rejeita query, fragmento, userinfo e headers nesta versão, e aceita somente os
 eventos oficiais do perfil.

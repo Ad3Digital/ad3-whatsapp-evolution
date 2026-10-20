@@ -99,6 +99,7 @@ def parser():
  leave=group.add_parser("leave"); leave.add_argument("--instance",required=True); leave.add_argument("--jid",required=True)
  msg=sub.add_parser("message").add_subparsers(dest="message_cmd",required=True)
  x=msg.add_parser("plan-text"); x.add_argument("--instance",required=True); x.add_argument("--number",required=True); x.add_argument("--content"); x.add_argument("--content-file",dest="content_file")
+ x=msg.add_parser("delete-plan"); x.add_argument("--instance",required=True); x.add_argument("--jid",required=True); x.add_argument("--min-ts",dest="min_ts",required=True)
  x=msg.add_parser("plan-media"); x.add_argument("--instance",required=True); x.add_argument("--number",required=True); x.add_argument("--mediatype",required=True); x.add_argument("--media",required=True); x.add_argument("--caption",default=""); x.add_argument("--file-name"); x.add_argument("--mimetype")
  number=sub.add_parser("number").add_subparsers(dest="number_cmd",required=True); check=number.add_parser("check"); check.add_argument("--instance",required=True); check.add_argument("--number",dest="numbers",action="append",required=True)
  webhook=sub.add_parser("webhook").add_subparsers(dest="webhook_cmd",required=True); get=webhook.add_parser("get"); get.add_argument("--instance",required=True); set_plan=webhook.add_parser("set-plan"); set_plan.add_argument("--instance",required=True); set_plan.add_argument("--url",required=True); set_plan.add_argument("--event",dest="events",action="append",default=[]); set_plan.add_argument("--enabled",action=argparse.BooleanOptionalAction,default=True); set_plan.add_argument("--by-events",dest="by_events",action=argparse.BooleanOptionalAction,default=True); set_plan.add_argument("--base64",action=argparse.BooleanOptionalAction,default=False)
@@ -203,6 +204,7 @@ def main(argv=None):
     out(s.plan("invite_revoke",{"instance":a.instance,"groupJid":a.jid}),a.pretty); return 0
    out(s.plan("group_leave",{"instance":a.instance,"groupJid":a.jid}),a.pretty); return 0
   if a.cmd=="message":
+   if a.message_cmd=="delete-plan": out(s.message_delete_plan(a.instance,a.jid,a.min_ts),a.pretty); return 0
    payload={"instance":a.instance,"number":a.number}
    if a.message_cmd=="plan-text": payload["content"]=read_message(a.content,a.content_file)
    else: payload.update({"mediatype":a.mediatype,"media":a.media,"caption":a.caption,"fileName":a.file_name,"mimetype":a.mimetype})

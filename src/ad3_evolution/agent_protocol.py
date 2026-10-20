@@ -79,7 +79,7 @@ def capabilities() -> dict[str, Any]:
             "commands": [
                 "instance create-plan|connect-plan",
                 "group create|setup-plan|update|invite|leave",
-                "message plan-text|plan-media",
+                "message plan-text|plan-media|delete-plan",
                 "number check|webhook get|set-plan",
                 "onboarding plan|apply",
                 "apply|blacklist",

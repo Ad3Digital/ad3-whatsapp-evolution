@@ -218,7 +218,8 @@ ad3-evolution --mode demo group update participants --instance creator --jid JID
 
 Remover e rebaixar usam `--action remove` e `--action demote`.
 
-Não promova uma instância sem validar seu owner `phoneNumber`.
+Não promova uma instância sem validar seu owner `phoneNumber`. Na Evolution 2.3.x o
+`ownerJid` substitui esse campo somente com a instância conectada.
 
 ## Convites, mensagens e blacklist
 
@@ -226,6 +227,7 @@ Não promova uma instância sem validar seu owner `phoneNumber`.
 ad3-evolution --mode demo group invite get --instance creator --jid JID
 ad3-evolution --mode demo blacklist add --phone 5511999999999
 ad3-evolution --mode demo message plan-text --instance creator --number JID --content "Bem-vindo"
+ad3-evolution --mode demo message delete-plan --instance creator --jid JID --min-ts 1792500000
 ```
 
 Mídia requer tipo e conteúdo:

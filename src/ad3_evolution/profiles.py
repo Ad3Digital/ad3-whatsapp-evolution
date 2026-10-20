@@ -47,6 +47,7 @@ ROUTES = {
     "group_leave": ("DELETE", "/group/leaveGroup/{instance}"),
     "send_text": ("POST", "/message/sendText/{instance}"),
     "send_media": ("POST", "/message/sendMedia/{instance}"),
+    "message_delete": ("DELETE", "/chat/deleteMessageForEveryone/{instance}"),
     "webhook_find": ("GET", "/webhook/find/{instance}"),
     "webhook_set": ("POST", "/webhook/set/{instance}"),
 }

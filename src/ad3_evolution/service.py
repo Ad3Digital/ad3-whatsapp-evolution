@@ -140,6 +140,33 @@ class Service:
   except ValueError as exc: raise PlanError(str(exc)) from None
   if self.mode=="demo": return [x for x in self.store.state("messages",[]) if x.get("key",{}).get("remoteJid")==jid][:limit]
   return self.client.request("message_history",instance,{"where":{"key":{"remoteJid":jid}},"take":limit})
+ def message_delete_plan(self,instance,jid,min_ts):
+  """Planeja apagar para todos só mensagens enviadas por nós; a prévia nunca expõe o ID externo."""
+  self._instance(instance)
+  try: validate_chat_jid(jid)
+  except ValueError as exc: raise PlanError(str(exc)) from None
+  if jid.lower().endswith("@lid"): raise PlanError("@lid identities are read-only and cannot target an API mutation")
+  try: min_ts=int(min_ts)
+  except (TypeError,ValueError): raise PlanError("min_ts must be an epoch timestamp") from None
+  if self.mode=="demo": records=[x for x in self.store.state("messages",[]) if x.get("key",{}).get("remoteJid")==jid]
+  else:
+   data=self._envelope(self.client.request("message_history",instance,{"where":{"key":{"remoteJid":jid}},"limit":50}))
+   records=data.get("messages",data)
+   if isinstance(records,dict): records=records.get("records",[])
+   if not isinstance(records,list): raise PlanError("message history has an unexpected shape")
+  own=[]
+  for item in records:
+   key=item.get("key") if isinstance(item,dict) else None
+   if not isinstance(key,dict) or key.get("fromMe") is not True or not key.get("id"): continue
+   stamp=int(item.get("messageTimestamp",0) or 0)
+   if stamp<min_ts: continue
+   message=item.get("message") if isinstance(item.get("message"),dict) else {}
+   text=message.get("conversation") or (message.get("extendedTextMessage") or {}).get("text") or ""
+   own.append({"id":str(key["id"]),"remoteJid":key.get("remoteJid") or jid,"participant":key.get("participant"),"timestamp":stamp,"type":item.get("messageType"),"preview":" ".join(str(text).split())[:60]})
+  if not own: raise PlanError("no own messages found since min_ts")
+  own.sort(key=lambda x:x["timestamp"])
+  plan=self.plan("message_delete",{"instance":instance,"jid":jid,"messages":own})
+  return {**plan,"preview":{"count":len(own),"messages":[{k:x[k] for k in ("timestamp","type","preview")} for x in own]}}
  def _read_limit(self,limit):
   try: value=int(limit)
   except (TypeError,ValueError): raise PlanError("limit must be between 1 and 100")
@@ -320,9 +347,19 @@ class Service:
    elif kind=="group_leave": groups.remove(g)
    self.store.save_state("groups",groups); return {"status":"simulated","operation":kind}
   if kind in {"message_text","message_media","webhook_set","invite_send"}: self.store.save_state("last_"+kind,p); return {"status":"simulated","operation":kind}
+  if kind=="message_delete": return {"status":"simulated","operation":kind,"count":len(p["messages"])}
   raise PlanError("unknown planned operation")
  def _remote_execute(self,kind,p,checkpoint=None):
   if kind=="api": return self._remote_api(p)
+  if kind=="message_delete":
+   results=[]
+   for item in p["messages"]:
+    body={"id":item["id"],"remoteJid":item["remoteJid"],"fromMe":True}
+    if item.get("participant"): body["participant"]=item["participant"]
+    try: self.client.request("message_delete",p["instance"],body); status="deleted"
+    except Exception: status="failed"
+    results.append({"timestamp":item["timestamp"],"preview":item["preview"],"status":status})
+   return {"status":"deleted" if all(x["status"]=="deleted" for x in results) else "partial","messages":results}
   if kind=="onboarding": return self._remote_onboarding(p,checkpoint)
   if kind=="group_setup": return self._remote_group_setup(p,checkpoint)
   if kind=="group_create" and p.get("existing_jid"):
@@ -427,6 +464,10 @@ class Service:
   items=self._items(self.client.request("instance_list"),"instances")
   def owner(name):
    item=next((x for x in items if x.get("name")==name or x.get("instanceName")==name),None); phone=(item or {}).get("phoneNumber")
+   # Evolution 2.3.x não devolve phoneNumber. ownerJid só vale com a instância conectada:
+   # desconectada, ele pode ser de uma sessão antiga e divergir do número real.
+   owner_jid=str((item or {}).get("ownerJid") or "")
+   if not phone and owner_jid.endswith("@s.whatsapp.net") and self._connected(name): phone=owner_jid.split("@",1)[0]
    if not phone: raise PlanError("instance owner phoneNumber unavailable")
    return self._normalize_group_phone(phone)
   participant_owners=[owner(name) for name in p.get("participant_instances",[])]; admin_owners=[owner(name) for name in p.get("admin_instances",[])]
@@ -462,6 +503,10 @@ class Service:
   items=self._items(self.client.request("instance_list"),"instances")
   def owner(name):
    item=next((x for x in items if x.get("name")==name or x.get("instanceName")==name),None); phone=(item or {}).get("phoneNumber")
+   # Evolution 2.3.x não devolve phoneNumber. ownerJid só vale com a instância conectada:
+   # desconectada, ele pode ser de uma sessão antiga e divergir do número real.
+   owner_jid=str((item or {}).get("ownerJid") or "")
+   if not phone and owner_jid.endswith("@s.whatsapp.net") and self._connected(name): phone=owner_jid.split("@",1)[0]
    if not phone: raise PlanError(f"instance owner phoneNumber unavailable: {name}")
    return self._normalize_group_phone(phone)
   additions=[owner(x) for x in p.get("participant_instances",[])]; admins=[owner(x) for x in p.get("admin_instances",[])]

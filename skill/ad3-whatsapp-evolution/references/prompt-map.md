@@ -12,6 +12,7 @@
 | Criar ou configurar grupo | `group create` ou `group setup-plan`, então `apply` |
 | Alterar membros, admins ou settings | Comando legados de plano, então `apply` |
 | Mensagem imediata | `message plan-text` ou `message plan-media`, então `apply` |
+| Apagar mensagem enviada por engano | `message delete-plan --instance X --jid JID --min-ts EPOCH`, revisar a prévia e `apply` |
 | Onboarding | `onboarding plan`, revisar e `apply` |
 | Consultar webhook | `webhook get --instance X` sanitizado |
 | Configurar webhook | `webhook set-plan`, revisar e `apply` |
