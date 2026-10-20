@@ -58,7 +58,7 @@ class Operations(unittest.TestCase):
  def test_remote_invite_send_payload(self):
   r=Recorder();s=Service(self.store,'remote',r);p=s.plan('invite_send',{'instance':'creator','groupJid':'x@g.us','description':'Entre','phones':['5511888888888']});s.apply(p['id'],p['id']);self.assertEqual(r.calls[-1],('invite_send','creator',{'groupJid':'x@g.us','description':'Entre','numbers':['5511888888888']},None))
  def test_remote_onboarding_steps(self):
-  r=Recorder();s=Service(self.store,'remote',r);p=s.plan('onboarding',{'creator_instance':'creator','participant_instances':['client'],'admin_instances':['support'],'client_phone':'5511888888888','group_name':'G'});s.apply(p['id'],p['id']);self.assertEqual([x[0] for x in r.calls],['instance_status','instance_status','instance_status','instance_list','whatsapp_validate','group_create','participants_add','participants_promote','group_info','instance_status','send_text','invite_get'])
+  r=Recorder();s=Service(self.store,'remote',r);p=s.plan('onboarding',{'creator_instance':'creator','participant_instances':['client'],'admin_instances':['support'],'client_phone':'5511888888888','group_name':'G'});s.apply(p['id'],p['id']);self.assertEqual([x[0] for x in r.calls],['instance_status','instance_list','whatsapp_validate','group_create','participants_add','participants_promote','group_info','instance_status','send_text','invite_get'])
  def test_remote_onboarding_phone_failure(self):
   r=Recorder();r.request=lambda op,*a,**k: {'state':'open'} if op=='instance_status' else ({'numbers':[]} if op=='whatsapp_validate' else {})
   s=Service(self.store,'remote',r);p=s.plan('onboarding',{'creator_instance':'creator','participant_instances':[],'admin_instances':[],'client_phone':'5511888888888','group_name':'G'});
@@ -140,10 +140,37 @@ class Operations(unittest.TestCase):
   r=Recorder();s=Service(self.store,'remote',r)
   p=s.plan('group_setup',{'instance':'creator','subject':'Webinar','description':'D','picture':'https://example.test/p.png','phones':['5511888888888','5511888888888'],'participant_instances':['client'],'admin_instances':['support'],'settings':['announcement','locked']})
   result=s.apply(p['id'],p['id']); self.assertEqual(result,{'group_jid':'x@g.us','status':'configured','verified':True,'admin_verification':'roles'})
-  self.assertEqual([x[0] for x in r.calls],['instance_status','instance_status','instance_status','instance_list','group_create','group_description','group_picture','participants_promote','group_settings','group_settings','group_info'])
-  create=r.calls[4][2]; self.assertEqual(create['participants'],['5511888888888','5511000000002','5511000000003'])
-  self.assertEqual(r.calls[7][2],{'groupJid':'x@g.us','action':'promote','participants':['5511000000003']})
-  self.assertEqual(r.calls[8][2],{'groupJid':'x@g.us','action':'announcement'})
+  self.assertEqual([x[0] for x in r.calls],['instance_status','instance_list','group_create','group_description','group_picture','participants_promote','group_settings','group_settings','group_info'])
+  create=r.calls[2][2]; self.assertEqual(create['participants'],['5511888888888','5511000000002','5511000000003'])
+  self.assertEqual(r.calls[5][2],{'groupJid':'x@g.us','action':'promote','participants':['5511000000003']})
+  self.assertEqual(r.calls[6][2],{'groupJid':'x@g.us','action':'announcement'})
+ def test_remote_group_setup_only_requires_creator_connected(self):
+  r=Recorder(); original=r.request
+  checked=[]
+  def support_offline(op,instance='',*args,**kwargs):
+   if op=='instance_status': checked.append(instance); return {'state':'open' if instance=='creator' else 'close'}
+   return original(op,instance,*args,**kwargs)
+  r.request=support_offline; s=Service(self.store,'remote',r)
+  p=s.plan('group_setup',{'instance':'creator','subject':'Cliente','phones':['5511888888888'],'participant_instances':['client'],'admin_instances':['support']})
+  self.assertEqual(s.apply(p['id'],p['id'])['status'],'configured')
+  self.assertEqual(checked,['creator'])
+  r=Recorder(); original=r.request
+  def creator_offline(op,instance='',*args,**kwargs):
+   if op=='instance_status': return {'state':'close'}
+   return original(op,instance,*args,**kwargs)
+  r.request=creator_offline; s=Service(self.store,'remote',r)
+  p=s.plan('group_setup',{'instance':'creator','subject':'Cliente 2','phones':['5511888888888']})
+  with self.assertRaises(PlanError) as caught: s.apply(p['id'],p['id'])
+  self.assertIn('creator',str(caught.exception)); self.assertNotIn('group_create',[x[0] for x in r.calls])
+ def test_remote_group_setup_accepts_desc_field_from_evolution(self):
+  r=Recorder(); original=r.request
+  def desc_field(op,*args,**kwargs):
+   result=original(op,*args,**kwargs)
+   if op=='group_info': result['group']['desc']=result['group'].pop('description')
+   return result
+  r.request=desc_field; s=Service(self.store,'remote',r)
+  p=s.plan('group_setup',{'instance':'creator','subject':'Cliente','description':'D','phones':['5511888888888']})
+  self.assertEqual(s.apply(p['id'],p['id'])['status'],'configured')
  def test_remote_group_setup_checks_admin_role_when_available(self):
   r=Recorder(); original=r.request
   def with_roles(op,*args,**kwargs):

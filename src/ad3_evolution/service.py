@@ -286,8 +286,7 @@ class Service:
    if checkpoint: checkpoint({"group_jid":jid,"phase":"created"})
    return {"group_jid":jid,"status":"created"}
   if kind=="group_setup":
-   for instance in [p["instance"],*p.get("participant_instances",[]),*p.get("admin_instances",[])]:
-    if not self._connected(instance): raise PlanError("instance not connected")
+   if not self._connected(p["instance"]): raise PlanError(f"instance not connected: {p['instance']}")
    jid=p.get("existing_jid") or f"{len(groups)+10000}-demo@g.us"; participants=list(dict.fromkeys([*p.get("phones",[]),*p.get("participant_instances",[]),*p.get("admin_instances",[])]))
    if checkpoint: checkpoint({"group_jid":jid,"phase":"created" if not p.get("existing_jid") else "adopted"})
    if p.get("existing_jid"):
@@ -297,8 +296,7 @@ class Service:
    item={"jid":jid,"subject":p["subject"],"description":p.get("description", ""),"picture":p.get("picture"),"participants":participants,"admins":list(p.get("admin_instances",[])),"settings":{setting:True for setting in dict.fromkeys(p.get("settings",[]))},"invite":f"demoinvite{len(groups)+1}","status":"configured"}
    groups.append(item); self.store.save_state("groups",groups); return {"group_jid":jid,"status":"configured","verified":True,"admin_verification":"simulated"}
   if kind=="onboarding":
-   for instance in [p["creator_instance"],*p.get("participant_instances",[]),*p.get("admin_instances",[])]:
-    if not self._connected(instance): raise PlanError(f"instance not connected: {instance}")
+   if not self._connected(p["creator_instance"]): raise PlanError(f"instance not connected: {p['creator_instance']}")
    jid=p.get("existing_jid") or f"{len(groups)+10000}-demo@g.us"; item=next((g for g in groups if g.get("jid")==jid),None)
    if item is None:
     item={"jid":jid,"subject":p["group_name"],"description":p.get("description", ""),"picture":p.get("picture"),"participants":[p["client_phone"],*p.get("participant_instances",[])],"admins":p.get("admin_instances",[]),"settings":{},"invite":f"demoinvite{len(groups)+1}","welcome_sent":False,"status":"onboarded"}; groups.append(item)
@@ -409,7 +407,8 @@ class Service:
  def _verify_group_setup(self,p,jid,admin_owners,expected_participants):
   info=self._group_body(self.client.request("group_info",p["instance"],query={"groupJid":jid}))
   members=self._verify_group_identity(p,jid,expected_participants,info)
-  if p.get("description") and info.get("description") != p["description"]: raise PlanError("group setup verification did not confirm description")
+  # Evolution 2.3.x devolve a descrição em "desc"; outras versões usam "description".
+  if p.get("description") and info.get("description",info.get("desc")) != p["description"]: raise PlanError("group setup verification did not confirm description")
   for setting in dict.fromkeys(p.get("settings",[])): self._setting_observed(info,setting)
   observed={str(x.get("phoneNumber") or x.get("number") or x.get("id") or x.get("jid") or "").split("@")[0].lstrip("+") for x in members}
   if not set(admin_owners)<=observed: raise PlanError("group setup verification did not confirm requested admins")
@@ -423,8 +422,8 @@ class Service:
   return "roles" if admin_owners else "not_applicable"
  def _remote_group_setup(self,p,checkpoint=None):
   creator=p["instance"]
-  for name in [creator,*p.get("participant_instances",[]),*p.get("admin_instances",[])]:
-   if not self._connected(name): raise PlanError("instance not connected")
+  # Só o criador age na API; participantes e admins por instância entram pelo número do dono.
+  if not self._connected(creator): raise PlanError(f"instance not connected: {creator}")
   items=self._items(self.client.request("instance_list"),"instances")
   def owner(name):
    item=next((x for x in items if x.get("name")==name or x.get("instanceName")==name),None); phone=(item or {}).get("phoneNumber")
@@ -459,8 +458,7 @@ class Service:
    raise PlanError("group setup uncertain after creation; use plan-status and resume with --existing-jid") from exc
   return {"group_jid":jid,"status":"configured","verified":True,"admin_verification":admin_verification}
  def _remote_onboarding(self,p,checkpoint=None):
-  for name in [p["creator_instance"],*p.get("participant_instances",[]),*p.get("admin_instances",[])]:
-   if not self._connected(name): raise PlanError(f"instance not connected: {name}")
+  if not self._connected(p["creator_instance"]): raise PlanError(f"instance not connected: {p['creator_instance']}")
   items=self._items(self.client.request("instance_list"),"instances")
   def owner(name):
    item=next((x for x in items if x.get("name")==name or x.get("instanceName")==name),None); phone=(item or {}).get("phoneNumber")
